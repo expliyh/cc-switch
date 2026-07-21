@@ -124,6 +124,8 @@ pub struct WebDavSyncSettings {
     pub profile: String,
     #[serde(default)]
     pub status: WebDavSyncStatus,
+    #[serde(default)]
+    pub danger_accept_invalid_certs: bool,
 }
 
 impl Default for WebDavSyncSettings {
@@ -137,6 +139,7 @@ impl Default for WebDavSyncSettings {
             remote_root: default_remote_root(),
             profile: default_profile(),
             status: WebDavSyncStatus::default(),
+            danger_accept_invalid_certs: false,
         }
     }
 }

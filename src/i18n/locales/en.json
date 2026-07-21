@@ -491,6 +491,8 @@
       "profile": "Sync Profile Name",
       "autoSync": "Auto Sync",
       "autoSyncHint": "When enabled, each database change triggers an automatic WebDAV upload.",
+      "dangerAcceptInvalidCerts": "Skip SSL certificate verification (insecure)",
+      "dangerAcceptInvalidCertsHint": "Only for self-signed certificates or internal CA environments. Severely weakens connection security.",
       "test": "Test Connection",
       "testing": "Testing...",
       "testSuccess": "Connection successful",

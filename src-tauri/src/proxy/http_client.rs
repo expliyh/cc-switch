@@ -52,7 +52,7 @@ fn get_proxy_port() -> u16 {
 ///   传入 None 或空字符串表示直连
 pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
-    let client = build_client(effective_url)?;
+    let client = build_client(effective_url, false)?;
 
     // 尝试初始化全局客户端，如果已存在则记录警告并使用 apply_proxy 更新
     if GLOBAL_CLIENT.set(RwLock::new(client.clone())).is_err() {
@@ -92,7 +92,7 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
 pub fn validate_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     // 只调用 build_client 来验证，但不应用
-    build_client(effective_url)?;
+    build_client(effective_url, false)?;
     Ok(())
 }
 
@@ -105,7 +105,7 @@ pub fn validate_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 /// * `proxy_url` - 代理 URL，None 或空字符串表示直连
 pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
-    let new_client = build_client(effective_url)?;
+    let new_client = build_client(effective_url, false)?;
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
@@ -149,7 +149,7 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 #[allow(dead_code)]
 pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
-    let new_client = build_client(effective_url)?;
+    let new_client = build_client(effective_url, false)?;
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
@@ -192,8 +192,22 @@ pub fn get() -> Client {
         .map(|c| c.clone())
         .unwrap_or_else(|| {
             log::warn!("[GlobalProxy] [GP-004] Client not initialized, using fallback");
-            build_client(None).unwrap_or_default()
+            build_client(None, false).unwrap_or_default()
         })
+}
+
+/// 获取 WebDAV 专用的 HTTP 客户端
+///
+/// 当 `danger_accept_invalid_certs` 为 true 时返回独立构建的跳过证书验证的客户端，
+/// 否则复用全局客户端。
+pub fn get_webdav_client(danger_accept_invalid_certs: bool) -> Client {
+    if !danger_accept_invalid_certs {
+        return get();
+    }
+    build_client(None, true).unwrap_or_else(|e| {
+        log::error!("[GlobalProxy] Failed to build insecure WebDAV client: {e}");
+        Client::new()
+    })
 }
 
 /// 获取当前代理 URL
@@ -213,7 +227,10 @@ pub fn is_proxy_enabled() -> bool {
 }
 
 /// 构建 HTTP 客户端
-fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
+fn build_client(
+    proxy_url: Option<&str>,
+    danger_accept_invalid_certs: bool,
+) -> Result<Client, String> {
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(600))
         .connect_timeout(Duration::from_secs(30))
@@ -225,6 +242,12 @@ fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
         .no_brotli()
         .no_deflate()
         .no_zstd();
+
+    if danger_accept_invalid_certs {
+        builder = builder
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
+    }
 
     // 有代理地址则使用代理，否则跟随系统代理
     if let Some(url) = proxy_url {
@@ -368,19 +391,19 @@ mod tests {
 
     #[test]
     fn test_build_client_direct() {
-        let result = build_client(None);
+        let result = build_client(None, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_build_client_with_http_proxy() {
-        let result = build_client(Some("http://127.0.0.1:7890"));
+        let result = build_client(Some("http://127.0.0.1:7890"), false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_build_client_with_socks5_proxy() {
-        let result = build_client(Some("socks5://127.0.0.1:1080"));
+        let result = build_client(Some("socks5://127.0.0.1:1080"), false);
         assert!(result.is_ok());
     }
 
@@ -388,7 +411,7 @@ mod tests {
     fn test_build_client_invalid_url() {
         // reqwest::Proxy::all 对某些无效 URL 不会立即报错
         // 使用明确无效的 scheme 来触发错误
-        let result = build_client(Some("invalid-scheme://127.0.0.1:7890"));
+        let result = build_client(Some("invalid-scheme://127.0.0.1:7890"), false);
         assert!(result.is_err(), "Should reject invalid proxy scheme");
     }
 

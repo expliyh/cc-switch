@@ -306,6 +306,7 @@ export interface WebDavSyncSettings {
   remoteRoot?: string;
   profile?: string;
   status?: WebDavSyncStatus;
+  dangerAcceptInvalidCerts?: boolean;
 }
 
 // S3 同步配置

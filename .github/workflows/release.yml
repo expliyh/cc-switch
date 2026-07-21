@@ -133,13 +133,12 @@ jobs:
       - name: Prepare Tauri signing key
         shell: bash
         run: |
-          # 调试：检查 Secret 是否存在
           if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
-            echo "❌ TAURI_SIGNING_PRIVATE_KEY Secret 为空或不存在" >&2
-            echo "请检查 GitHub 仓库 Settings > Secrets and variables > Actions" >&2
-            exit 1
+            echo "⚠️ TAURI_SIGNING_PRIVATE_KEY Secret 未配置，将跳过签名" >&2
+            echo "SKIP_SIGNING=true" >> "$GITHUB_ENV"
+            exit 0
           fi
-          
+          echo "SKIP_SIGNING=false" >> "$GITHUB_ENV"
           RAW="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
           # 目标：提供正确的私钥“文件路径”给 Tauri CLI，避免内容解码歧义
           KEY_PATH="$RUNNER_TEMP/tauri_signing.key"
@@ -187,10 +186,15 @@ jobs:
           echo "✅ Tauri signing key prepared"
 
       - name: Import Apple signing certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            echo "⚠️ APPLE_CERTIFICATE Secret 未配置，跳过 macOS 签名" >&2
+            echo "SKIP_SIGNING=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
           # Decode .p12 certificate from base64
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
           printf '%s' "${{ secrets.APPLE_CERTIFICATE }}" | (base64 --decode 2>/dev/null || base64 -D) > "$CERT_PATH"
@@ -229,7 +233,7 @@ jobs:
           rm -f "$CERT_PATH"
 
       - name: Build Tauri App (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         timeout-minutes: 60
         env:
@@ -264,6 +268,9 @@ jobs:
           WINDOWS_RELEASE_ARCH: ${{ matrix.arch || 'x86_64' }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($env:SKIP_SIGNING -eq 'true') {
+            (Get-Content src-tauri/tauri.conf.json) -replace '"createUpdaterArtifacts": true', '"createUpdaterArtifacts": false' | Set-Content src-tauri/tauri.conf.json
+          }
           if ($env:WINDOWS_RELEASE_ARCH -eq 'arm64') {
             pnpm tauri build --target aarch64-pc-windows-msvc --bundles msi
           } else {
@@ -272,10 +279,15 @@ jobs:
 
       - name: Build Tauri App (Linux)
         if: runner.os == 'Linux'
-        run: pnpm tauri build --bundles appimage,deb,rpm
+        shell: bash
+        run: |
+          if [ "${SKIP_SIGNING:-}" = "true" ]; then
+            sed -i 's/"createUpdaterArtifacts": true/"createUpdaterArtifacts": false/' src-tauri/tauri.conf.json
+          fi
+          pnpm tauri build --bundles appimage,deb,rpm
 
       - name: Prepare macOS Assets
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -350,7 +362,7 @@ jobs:
           echo "✅ Styled DMG created: $NEW_DMG"
 
       - name: Notarize macOS DMG
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         timeout-minutes: 30
         env:
@@ -392,7 +404,7 @@ jobs:
           done
 
       - name: Verify macOS code signing and notarization
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -463,13 +475,14 @@ jobs:
             if (Test-Path $sigPath) {
               Copy-Item $sigPath (Join-Path release-assets ("$dest.sig"))
               Write-Host "Signature copied: $dest.sig"
-            } elseif ($isArm64) {
-              throw "Signature not found for $($msi.Name)"
             } else {
               Write-Warning "Signature not found for $($msi.Name)"
             }
           } elseif ($isArm64) {
-            throw 'No Windows ARM64 MSI installer found'
+            # Windows ARM64: msi bundle requires WiX 5, which is only fully supported on
+            # Windows 11 24H2+ arm64 runners. When the MSI is missing, fall back to
+            # packaging a portable zip instead of failing the build.
+            Write-Warning 'No Windows ARM64 MSI installer found, packaging portable zip only'
           } else {
             Write-Warning 'No Windows MSI installer found'
           }
@@ -550,12 +563,17 @@ jobs:
       - name: List prepared assets
         shell: bash
         run: |
+          mkdir -p release-assets
           ls -la release-assets || true
 
       - name: Collect Signatures
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ env.SKIP_SIGNING }}" = "true" ]; then
+            echo "⚠️ 签名已跳过，无 .sig 文件"
+            exit 0
+          fi
           echo "Collected signatures (if any alongside artifacts):"
           ls -la release-assets/*.sig || echo "No signatures found"
 
@@ -564,7 +582,7 @@ jobs:
         with:
           name: release-assets-${{ runner.os }}-${{ matrix.arch || runner.arch }}
           path: release-assets/*
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: List generated bundles (debug)
         if: always()
@@ -574,7 +592,7 @@ jobs:
           find src-tauri/target -maxdepth 4 -type f -name "*.*" 2>/dev/null || true
 
       - name: Clean up Apple signing keychain
-        if: runner.os == 'macOS' && always()
+        if: runner.os == 'macOS' && always() && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           if [ -n "${ORIGINAL_DEFAULT_KEYCHAIN:-}" ]; then
@@ -588,6 +606,7 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-22.04
     needs: release
+    if: always() && !failure() && !cancelled()
     permissions:
       contents: write
     steps:
@@ -613,22 +632,21 @@ jobs:
           body: |
             ## CC Switch ${{ github.ref_name }}
 
-            🌐 **Only Official Website / 唯一官方网站 / 唯一の公式サイト**: [ccswitch.io](https://ccswitch.io)
+            > ⚠️ This is an **unofficial fork** build from [expliyh/cc-switch](https://github.com/expliyh/cc-switch).
+            > It does **not** include macOS builds (no Apple signing certificate).
+            > For the official release including macOS, please visit:
+            > 🔗 **[farion1231/cc-switch Releases](https://github.com/farion1231/cc-switch/releases)**
 
             Claude Code 供应商切换工具
 
             ### 下载
 
-            - **macOS**: `CC-Switch-${{ github.ref_name }}-macOS.dmg`（推荐）或 `CC-Switch-${{ github.ref_name }}-macOS.zip`（解压即用）
             - **Windows (x86_64)**: `CC-Switch-${{ github.ref_name }}-Windows.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
             - **Windows (ARM64)**: `CC-Switch-${{ github.ref_name }}-Windows-arm64.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-arm64-Portable.zip`（绿色版）
             - **Linux (x86_64)**: `CC-Switch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
             - **Linux (ARM64)**: `CC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
 
-            > `.tar.gz` 为 Tauri updater 自动更新专用，无需手动下载。
-
-            ---
-            macOS 版本已通过 Apple 代码签名和公证，可直接安装使用。
+            > macOS 版本请到[官方仓库](https://github.com/farion1231/cc-switch/releases)下载。
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
