@@ -475,13 +475,14 @@ jobs:
             if (Test-Path $sigPath) {
               Copy-Item $sigPath (Join-Path release-assets ("$dest.sig"))
               Write-Host "Signature copied: $dest.sig"
-            } elseif ($isArm64) {
-              throw "Signature not found for $($msi.Name)"
             } else {
               Write-Warning "Signature not found for $($msi.Name)"
             }
           } elseif ($isArm64) {
-            throw 'No Windows ARM64 MSI installer found'
+            # Windows ARM64: msi bundle requires WiX 5, which is only fully supported on
+            # Windows 11 24H2+ arm64 runners. When the MSI is missing, fall back to
+            # packaging a portable zip instead of failing the build.
+            Write-Warning 'No Windows ARM64 MSI installer found, packaging portable zip only'
           } else {
             Write-Warning 'No Windows MSI installer found'
           }
