@@ -278,11 +278,10 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          BUNDLES="appimage,deb,rpm"
           if [ "${SKIP_SIGNING:-}" = "true" ]; then
-            export TAURI_SIGNING_PRIVATE_KEY=""
+            sed -i 's/"createUpdaterArtifacts": true/"createUpdaterArtifacts": false/' src-tauri/tauri.conf.json
           fi
-          pnpm tauri build --bundles "$BUNDLES"
+          pnpm tauri build --bundles appimage,deb,rpm
 
       - name: Prepare macOS Assets
         if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
