@@ -129,9 +129,13 @@ fn webdav_transport_error(
 // ─── HTTP operations ─────────────────────────────────────────
 
 /// Test WebDAV connectivity via PROPFIND Depth=0 on the base URL.
-pub async fn test_connection(base_url: &str, auth: &WebDavAuth) -> Result<(), AppError> {
+pub async fn test_connection(
+    base_url: &str,
+    auth: &WebDavAuth,
+    danger_accept_invalid_certs: bool,
+) -> Result<(), AppError> {
     let url = parse_base_url(base_url)?;
-    let client = http_client::get();
+    let client = http_client::get_webdav_client(danger_accept_invalid_certs);
 
     let resp = apply_auth(
         client
@@ -166,11 +170,12 @@ pub async fn ensure_remote_directories(
     base_url: &str,
     segments: &[String],
     auth: &WebDavAuth,
+    danger_accept_invalid_certs: bool,
 ) -> Result<(), AppError> {
     if segments.is_empty() {
         return Ok(());
     }
-    let client = http_client::get();
+    let client = http_client::get_webdav_client(danger_accept_invalid_certs);
 
     for depth in 1..=segments.len() {
         let prefix = &segments[..depth];
@@ -227,8 +232,9 @@ pub async fn put_bytes(
     auth: &WebDavAuth,
     bytes: Vec<u8>,
     content_type: &str,
+    danger_accept_invalid_certs: bool,
 ) -> Result<(), AppError> {
-    let client = http_client::get();
+    let client = http_client::get_webdav_client(danger_accept_invalid_certs);
     let resp = apply_auth(
         client
             .put(url)
@@ -254,8 +260,9 @@ pub async fn get_bytes(
     url: &str,
     auth: &WebDavAuth,
     max_bytes: usize,
+    danger_accept_invalid_certs: bool,
 ) -> Result<Option<(Vec<u8>, Option<String>)>, AppError> {
-    let client = http_client::get();
+    let client = http_client::get_webdav_client(danger_accept_invalid_certs);
     let resp = apply_auth(
         client
             .get(url)
@@ -298,8 +305,12 @@ pub async fn get_bytes(
 }
 
 /// HEAD request to retrieve the ETag. Returns `None` on 404.
-pub async fn head_etag(url: &str, auth: &WebDavAuth) -> Result<Option<String>, AppError> {
-    let client = http_client::get();
+pub async fn head_etag(
+    url: &str,
+    auth: &WebDavAuth,
+    danger_accept_invalid_certs: bool,
+) -> Result<Option<String>, AppError> {
+    let client = http_client::get_webdav_client(danger_accept_invalid_certs);
     let resp = apply_auth(
         client
             .head(url)

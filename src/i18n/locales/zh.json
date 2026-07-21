@@ -488,6 +488,8 @@
       "profile": "同步配置名",
       "autoSync": "自动同步",
       "autoSyncHint": "开启后每次数据库变更都会自动上传到 WebDAV。",
+      "dangerAcceptInvalidCerts": "跳过 SSL 证书验证（不安全）",
+      "dangerAcceptInvalidCertsHint": "仅用于自签名证书或企业内部 CA 环境，会严重降低连接安全性。",
       "test": "测试连接",
       "testing": "测试中...",
       "testSuccess": "连接成功",

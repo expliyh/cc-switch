@@ -133,13 +133,12 @@ jobs:
       - name: Prepare Tauri signing key
         shell: bash
         run: |
-          # 调试：检查 Secret 是否存在
           if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
-            echo "❌ TAURI_SIGNING_PRIVATE_KEY Secret 为空或不存在" >&2
-            echo "请检查 GitHub 仓库 Settings > Secrets and variables > Actions" >&2
-            exit 1
+            echo "⚠️ TAURI_SIGNING_PRIVATE_KEY Secret 未配置，将跳过签名" >&2
+            echo "SKIP_SIGNING=true" >> "$GITHUB_ENV"
+            exit 0
           fi
-          
+          echo "SKIP_SIGNING=false" >> "$GITHUB_ENV"
           RAW="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
           # 目标：提供正确的私钥“文件路径”给 Tauri CLI，避免内容解码歧义
           KEY_PATH="$RUNNER_TEMP/tauri_signing.key"
@@ -187,10 +186,15 @@ jobs:
           echo "✅ Tauri signing key prepared"
 
       - name: Import Apple signing certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            echo "⚠️ APPLE_CERTIFICATE Secret 未配置，跳过 macOS 签名" >&2
+            echo "SKIP_SIGNING=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
           # Decode .p12 certificate from base64
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
           printf '%s' "${{ secrets.APPLE_CERTIFICATE }}" | (base64 --decode 2>/dev/null || base64 -D) > "$CERT_PATH"
@@ -229,7 +233,7 @@ jobs:
           rm -f "$CERT_PATH"
 
       - name: Build Tauri App (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         timeout-minutes: 60
         env:
@@ -275,7 +279,7 @@ jobs:
         run: pnpm tauri build --bundles appimage,deb,rpm
 
       - name: Prepare macOS Assets
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -350,7 +354,7 @@ jobs:
           echo "✅ Styled DMG created: $NEW_DMG"
 
       - name: Notarize macOS DMG
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         timeout-minutes: 30
         env:
@@ -392,7 +396,7 @@ jobs:
           done
 
       - name: Verify macOS code signing and notarization
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -550,12 +554,17 @@ jobs:
       - name: List prepared assets
         shell: bash
         run: |
+          mkdir -p release-assets
           ls -la release-assets || true
 
       - name: Collect Signatures
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ env.SKIP_SIGNING }}" = "true" ]; then
+            echo "⚠️ 签名已跳过，无 .sig 文件"
+            exit 0
+          fi
           echo "Collected signatures (if any alongside artifacts):"
           ls -la release-assets/*.sig || echo "No signatures found"
 
@@ -564,7 +573,7 @@ jobs:
         with:
           name: release-assets-${{ runner.os }}-${{ matrix.arch || runner.arch }}
           path: release-assets/*
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: List generated bundles (debug)
         if: always()
@@ -574,7 +583,7 @@ jobs:
           find src-tauri/target -maxdepth 4 -type f -name "*.*" 2>/dev/null || true
 
       - name: Clean up Apple signing keychain
-        if: runner.os == 'macOS' && always()
+        if: runner.os == 'macOS' && always() && env.SKIP_SIGNING != 'true'
         shell: bash
         run: |
           if [ -n "${ORIGINAL_DEFAULT_KEYCHAIN:-}" ]; then
@@ -588,6 +597,7 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-22.04
     needs: release
+    if: always() && !failure() && !cancelled()
     permissions:
       contents: write
     steps:

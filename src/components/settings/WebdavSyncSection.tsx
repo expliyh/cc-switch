@@ -270,6 +270,7 @@ export function WebdavSyncSection({
     remoteRoot: config?.remoteRoot ?? "cc-switch-sync",
     profile: config?.profile ?? "default",
     autoSync: config?.autoSync ?? false,
+    dangerAcceptInvalidCerts: config?.dangerAcceptInvalidCerts ?? false,
   }));
 
   // ─── S3 form state ─────────────────────────────────────────
@@ -366,6 +367,7 @@ export function WebdavSyncSection({
         remoteRoot: nextRemoteRoot,
         profile: nextProfile,
         autoSync: config.autoSync ?? false,
+        dangerAcceptInvalidCerts: config.dangerAcceptInvalidCerts ?? false,
       };
     });
     setPasswordTouched(false);
@@ -464,6 +466,7 @@ export function WebdavSyncSection({
       remoteRoot: form.remoteRoot.trim() || "cc-switch-sync",
       profile: form.profile.trim() || "default",
       autoSync: form.autoSync,
+      dangerAcceptInvalidCerts: form.dangerAcceptInvalidCerts,
     };
   }, [form, passwordTouched]);
 
@@ -1118,6 +1121,34 @@ export function WebdavSyncSection({
                   checked={form.autoSync}
                   onCheckedChange={handleAutoSyncChange}
                   aria-label={t("settings.webdavSync.autoSync")}
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-start gap-4">
+              <label className="w-40 text-xs font-medium text-foreground shrink-0">
+                <span className="inline-flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3 text-destructive" />
+                  {t("settings.webdavSync.dangerAcceptInvalidCerts")}
+                </span>
+                <span className="block text-[10px] font-normal text-destructive/80">
+                  {t("settings.webdavSync.dangerAcceptInvalidCertsHint")}
+                </span>
+              </label>
+              <div className="pt-1">
+                <Switch
+                  checked={form.dangerAcceptInvalidCerts}
+                  onCheckedChange={(checked) => {
+                    setForm((prev) => ({ ...prev, dangerAcceptInvalidCerts: checked }));
+                    setDirty(true);
+                    setJustSaved(false);
+                    if (justSavedTimerRef.current) {
+                      clearTimeout(justSavedTimerRef.current);
+                      justSavedTimerRef.current = null;
+                    }
+                  }}
+                  aria-label={t("settings.webdavSync.dangerAcceptInvalidCerts")}
                   disabled={isLoading}
                 />
               </div>
